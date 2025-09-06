@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev --turbopack",
+    "dev:https": "mkdir -p certs; next dev --turbopack --hostname 0.0.0.0 & node scripts/https-proxy.js",
     "build": "next build --turbopack",
     "start": "next start"
   },

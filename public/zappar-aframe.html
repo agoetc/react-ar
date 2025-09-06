@@ -16,7 +16,7 @@
     </style>
   </head>
   <body>
-    <div class="overlay">Zappar + A‑Frame: ワールド上に画像を配置（タップで配置/固定）</div>
+    <div class="overlay" id="hud">Zappar + A‑Frame: ワールド上に画像を配置（タップで配置/固定）</div>
     <div class="hint">画面をタップして画像を配置・固定できます</div>
 
     <!-- AR Scene -->
@@ -42,14 +42,62 @@
     <script>
       const anchor = document.getElementById('instantAnchor');
       const assets = document.getElementById('assets');
+      const hud = document.getElementById('hud');
+      let deviceHeadingDeg = 0; // 0..360, 0 = 北（仮定）
+      let headingStarted = false;
 
       // Toggle placement mode on tap (place/fix content)
       const togglePlacement = () => {
         const current = anchor.getAttribute('zappar-instant');
         const placing = current && (current.placementMode === true || current.placementMode === 'true');
         anchor.setAttribute('zappar-instant', 'placement-mode', placing ? 'false' : 'true');
+        // On first user gesture, try to start device orientation permissions
+        ensureHeadingPermission();
       };
       document.body.addEventListener('click', togglePlacement);
+
+      function handleOrientation(e) {
+        let heading = null;
+        // iOS Safari provides webkitCompassHeading (0 = 北, 時計回り)
+        if (typeof e.webkitCompassHeading === 'number') {
+          heading = e.webkitCompassHeading;
+        } else if (e.absolute === true && typeof e.alpha === 'number') {
+          // 一部ブラウザでは alpha が真北基準（0=北）の場合があるため簡易対応
+          heading = 360 - e.alpha; // 右回りに正となるよう反転
+        }
+        if (heading != null && isFinite(heading)) {
+          deviceHeadingDeg = (heading + 360) % 360;
+          // console.log('[Heading] 現在の方位(度):', deviceHeadingDeg.toFixed(1));
+        }
+      }
+
+      function handleOrientationAbsolute(e) {
+        // Some browsers fire a separate absolute event
+        handleOrientation(e);
+      }
+
+      function startHeading() {
+        if (headingStarted) return;
+        headingStarted = true;
+        window.addEventListener('deviceorientation', handleOrientation, true);
+        window.addEventListener('deviceorientationabsolute', handleOrientationAbsolute, true);
+      }
+
+      function ensureHeadingPermission() {
+        if (headingStarted) return;
+        try {
+          const maybe = window.DeviceOrientationEvent;
+          if (maybe && typeof maybe.requestPermission === 'function') {
+            maybe.requestPermission().then((res) => {
+              if (res === 'granted') startHeading();
+            }).catch((err) => console.warn('DeviceOrientation permission error', err));
+          } else {
+            startHeading();
+          }
+        } catch (e) {
+          console.warn('DeviceOrientation init error', e);
+        }
+      }
 
       // Haversine distance in kilometers
       function haversine(lat1, lon1, lat2, lon2) {
@@ -80,69 +128,121 @@
         return (within.length ? within : withDist).slice(0, 5); // show up to 5
       }
 
-      function addPlanes(items) {
+      // Initial bearing (degrees) from (lat1, lon1) to (lat2, lon2)
+      function bearingDeg(lat1, lon1, lat2, lon2) {
+        const toRad = (d) => (d * Math.PI) / 180;
+        const toDeg = (r) => (r * 180) / Math.PI;
+        const φ1 = toRad(lat1);
+        const φ2 = toRad(lat2);
+        const Δλ = toRad(lon2 - lon1);
+        const y = Math.sin(Δλ) * Math.cos(φ2);
+        const x = Math.cos(φ1) * Math.sin(φ2) - Math.sin(φ1) * Math.cos(φ2) * Math.cos(Δλ);
+        let θ = toDeg(Math.atan2(y, x));
+        return (θ + 360) % 360; // normalize 0..360
+      }
+
+      function kmToMetersScaled(km) {
+        // Tunable mapping: 1km -> 0.08m, clamped to [0.6m, 8m]
+        const SCALE = 0.08;
+        return Math.max(0.6, Math.min(8, km * SCALE));
+      }
+
+      function addPlanes(items, user) {
         // Clear existing
         while (anchor.firstChild) anchor.removeChild(anchor.firstChild);
 
-        // Arrange planes in a circle around the origin
-        const radius = 0.8; // meters
-        const y = 0; // height on ground plane
-
         items.forEach((item, idx) => {
-          // Add asset image
-          const img = document.createElement('img');
-          const assetId = `img_${idx}`;
-          img.setAttribute('id', assetId);
-          img.setAttribute('src', item.imagePath);
-          img.setAttribute('crossorigin', 'anonymous');
-          assets.appendChild(img);
+          // Compute radial placement from user to item using geographic bearing
+          const bearing = bearingDeg(user.latitude, user.longitude, item.latitude, item.longitude);
+          const distanceKm = haversine(user.latitude, user.longitude, item.latitude, item.longitude);
+          const r = kmToMetersScaled(distanceKm);
+          const rad = (bearing * Math.PI) / 180;
 
-          const angle = (idx / items.length) * Math.PI * 2;
-          const x = Math.cos(angle) * radius;
-          const z = Math.sin(angle) * radius;
+          // A-Frame: -Z forward, X right. Map 0° (north) -> forward (-Z)
+          const x = Math.sin(rad) * r;
+          const z = -Math.cos(rad) * r;
+
+          // Height from data (meters), clamped
+          const y = Math.max(0, Math.min(5, Number(item.height) || 0));
 
           const plane = document.createElement('a-plane');
-          plane.setAttribute('src', `#${assetId}`);
-          plane.setAttribute('position', `${x} ${y} ${z}`);
-          plane.setAttribute('rotation', `-90 0 0`);
-          plane.setAttribute('width', '0.6');
-          plane.setAttribute('height', '0.6');
+          // Use direct URL as src to avoid asset reloading race during frequent re-renders
+          plane.setAttribute('src', item.imagePath);
+          plane.setAttribute('position', `${x.toFixed(3)} ${y.toFixed(3)} ${z.toFixed(3)}`);
+
+          // Rotate around Y by the object's direction minus user's heading.
+          // A-Frame plane faces +Z by default; camera faces -Z. Add 180° offset so 0° faces -Z (north).
+          const yawBase = (((Number(item.direction) || 0) - deviceHeadingDeg) + 360) % 360;
+          const yaw = (yawBase + 180) % 360;
+          plane.setAttribute('rotation', `0 ${yaw.toFixed(1)} 0`);
+
+          // Size (meters) and render sides
+          plane.setAttribute('width', '1.0');
+          plane.setAttribute('height', '1.0');
+          plane.setAttribute('material', 'side: double; transparent: true;');
 
           anchor.appendChild(plane);
         });
       }
 
-      function onGeolocated(pos) {
-        const { latitude, longitude } = pos.coords;
-        console.log('[Geolocation] 現在の緯度経度:', { latitude, longitude });
-        fetchImageObjects()
-          .then((data) => selectNearby(data, latitude, longitude))
-          .then(addPlanes)
-          .catch((e) => {
-            console.error(e);
-          });
+      // Cache for image objects and last known position
+      let cachedImageObjects = null;
+      let lastPosition = null;
+
+      function renderWithPosition(lat, lon) {
+        if (!cachedImageObjects) return; // not ready yet
+        const items = selectNearby(cachedImageObjects, lat, lon);
+        console.log('[AR] rendering', items.length, 'items at', { lat, lon, heading: deviceHeadingDeg.toFixed(1) });
+        addPlanes(items, { latitude: lat, longitude: lon });
+        if (hud) {
+          hud.textContent = `Zappar + A‑Frame | lat: ${lat.toFixed(6)} lon: ${lon.toFixed(6)} | heading: ${deviceHeadingDeg.toFixed(1)}°`;
+        }
+      }
+
+      function startGeolocationLoop() {
+        // Re-render every 500ms using the latest known position
+        setInterval(() => {
+          if (lastPosition) {
+            const { latitude, longitude } = lastPosition.coords;
+            renderWithPosition(latitude, longitude);
+          }
+        }, 500);
+
+        if (!navigator.geolocation) {
+          onGeoError(new Error('Geolocation not supported'));
+          return;
+        }
+
+        // Continuously update lastPosition
+        navigator.geolocation.watchPosition(
+          (pos) => {
+            lastPosition = pos;
+            const { latitude, longitude } = pos.coords;
+            console.log('[Geolocation] 現在の緯度経度:', { latitude, longitude });
+          },
+          onGeoError,
+          { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
+        );
       }
 
       function onGeoError(err) {
         console.warn('Geolocation error', err);
-        // Fallback: load nearest from a default location (Tokyo)
+        // Fallback: use Tokyo Station and still keep the 500ms loop
         const latitude = 35.681236, longitude = 139.767125;
         console.log('[Geolocation] 取得失敗のため東京駅座標を使用:', { latitude, longitude });
-        fetchImageObjects()
-          .then((data) => selectNearby(data, latitude, longitude))
-          .then(addPlanes)
-          .catch((e) => console.error(e));
+        lastPosition = { coords: { latitude, longitude } };
       }
 
-      if (navigator.geolocation) {
-        navigator.geolocation.getCurrentPosition(onGeolocated, onGeoError, {
-          enableHighAccuracy: true,
-          timeout: 5000,
-          maximumAge: 0,
+      // Boot: fetch data once, then start geolocation + render loop
+      fetchImageObjects()
+        .then((data) => {
+          cachedImageObjects = data;
+          startGeolocationLoop();
+        })
+        .catch((e) => {
+          console.error('Failed to load image objects', e);
+          startGeolocationLoop();
         });
-      } else {
-        onGeoError(new Error('Geolocation not supported'));
-      }
     </script>
   </body>
   </html>
