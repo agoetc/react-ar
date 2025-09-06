@@ -33,27 +33,116 @@
       <a-camera zappar-camera="userFacing: false"></a-camera>
 
       <!-- Assets -->
-      <a-assets>
-        <img id="sampleImage" src="/sample-image.svg" crossorigin="anonymous" />
-      </a-assets>
+      <a-assets id="assets"></a-assets>
 
       <!-- Instant World Tracking Anchor -->
-      <a-entity id="instantAnchor" zappar-instant="placement-mode: true">
-        <!-- Simple plane showing an image. Adjust scale/rotation as desired. -->
-        <a-plane src="#sampleImage" position="0 0 0" rotation="-90 0 0" width="1" height="1"></a-plane>
-      </a-entity>
+      <a-entity id="instantAnchor" zappar-instant="placement-mode: true"></a-entity>
     </a-scene>
 
     <script>
-      // Tap to toggle placement mode off (fix content in place)
       const anchor = document.getElementById('instantAnchor');
+      const assets = document.getElementById('assets');
+
+      // Toggle placement mode on tap (place/fix content)
       const togglePlacement = () => {
         const current = anchor.getAttribute('zappar-instant');
         const placing = current && (current.placementMode === true || current.placementMode === 'true');
         anchor.setAttribute('zappar-instant', 'placement-mode', placing ? 'false' : 'true');
       };
       document.body.addEventListener('click', togglePlacement);
+
+      // Haversine distance in kilometers
+      function haversine(lat1, lon1, lat2, lon2) {
+        const toRad = (d) => (d * Math.PI) / 180;
+        const R = 6371; // km
+        const dLat = toRad(lat2 - lat1);
+        const dLon = toRad(lon2 - lon1);
+        const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+                  Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
+                  Math.sin(dLon / 2) * Math.sin(dLon / 2);
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        return R * c;
+      }
+
+      async function fetchImageObjects() {
+        const res = await fetch('/api/image-objects', { cache: 'no-store' });
+        if (!res.ok) throw new Error('failed to fetch image objects');
+        return await res.json();
+      }
+
+      function selectNearby(data, userLat, userLon) {
+        const withDist = data.map((d) => ({
+          ...d,
+          distanceKm: haversine(userLat, userLon, d.latitude, d.longitude),
+        }));
+        withDist.sort((a, b) => a.distanceKm - b.distanceKm);
+        const within = withDist.filter((d) => d.distanceKm <= 100); // within 100km
+        return (within.length ? within : withDist).slice(0, 5); // show up to 5
+      }
+
+      function addPlanes(items) {
+        // Clear existing
+        while (anchor.firstChild) anchor.removeChild(anchor.firstChild);
+
+        // Arrange planes in a circle around the origin
+        const radius = 0.8; // meters
+        const y = 0; // height on ground plane
+
+        items.forEach((item, idx) => {
+          // Add asset image
+          const img = document.createElement('img');
+          const assetId = `img_${idx}`;
+          img.setAttribute('id', assetId);
+          img.setAttribute('src', item.imagePath);
+          img.setAttribute('crossorigin', 'anonymous');
+          assets.appendChild(img);
+
+          const angle = (idx / items.length) * Math.PI * 2;
+          const x = Math.cos(angle) * radius;
+          const z = Math.sin(angle) * radius;
+
+          const plane = document.createElement('a-plane');
+          plane.setAttribute('src', `#${assetId}`);
+          plane.setAttribute('position', `${x} ${y} ${z}`);
+          plane.setAttribute('rotation', `-90 0 0`);
+          plane.setAttribute('width', '0.6');
+          plane.setAttribute('height', '0.6');
+
+          anchor.appendChild(plane);
+        });
+      }
+
+      function onGeolocated(pos) {
+        const { latitude, longitude } = pos.coords;
+        console.log('[Geolocation] 現在の緯度経度:', { latitude, longitude });
+        fetchImageObjects()
+          .then((data) => selectNearby(data, latitude, longitude))
+          .then(addPlanes)
+          .catch((e) => {
+            console.error(e);
+          });
+      }
+
+      function onGeoError(err) {
+        console.warn('Geolocation error', err);
+        // Fallback: load nearest from a default location (Tokyo)
+        const latitude = 35.681236, longitude = 139.767125;
+        console.log('[Geolocation] 取得失敗のため東京駅座標を使用:', { latitude, longitude });
+        fetchImageObjects()
+          .then((data) => selectNearby(data, latitude, longitude))
+          .then(addPlanes)
+          .catch((e) => console.error(e));
+      }
+
+      if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(onGeolocated, onGeoError, {
+          enableHighAccuracy: true,
+          timeout: 5000,
+          maximumAge: 0,
+        });
+      } else {
+        onGeoError(new Error('Geolocation not supported'));
+      }
     </script>
   </body>
   </html>
-

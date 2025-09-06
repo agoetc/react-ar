@@ -15,10 +15,9 @@ export default function ZapparPage() {
           title="Zappar + A‑Frame"
           src="/zappar-aframe.html"
           style={{ width: "100%", height: "100%", border: 0 }}
-          allow="camera; gyroscope; accelerometer; magnetometer"
+          allow="camera; geolocation; gyroscope; accelerometer; magnetometer"
         />
       </div>
     </main>
   );
 }
-
