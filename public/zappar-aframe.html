@@ -46,6 +46,8 @@
       // Cache map: image URL -> asset selector (e.g., #img_0)
       const imageAssetCache = new Map();
       let imageAssetSeq = 0;
+      // Plane cache: stable key (imagePath + lat/long) -> a-plane element
+      const planeCache = new Map();
       let deviceHeadingDeg = 0; // 0..360, 0 = 北（仮定）
       let headingStarted = false;
 
@@ -150,11 +152,12 @@
         return Math.max(0.6, Math.min(8, km * SCALE));
       }
 
-      function addPlanes(items, user) {
-        // Clear existing
-        while (anchor.firstChild) anchor.removeChild(anchor.firstChild);
+      function updatePlanes(items, user) {
+        const activeKeys = new Set();
 
         items.forEach((item, idx) => {
+          const key = `${item.imagePath}|${item.latitude},${item.longitude}`;
+          activeKeys.add(key);
           // Ensure cached <img> asset exists and get its selector
           const assetSelector = ensureAssetFor(item.imagePath);
           // Compute radial placement from user to item using geographic bearing
@@ -170,9 +173,21 @@
           // Height from data (meters), clamped
           const y = Math.max(0, Math.min(5, Number(item.height) || 0));
 
-          const plane = document.createElement('a-plane');
-          // Use cached asset by id (e.g., #img_0) so the same HTMLImageElement/texture is reused
-          plane.setAttribute('src', assetSelector);
+          let plane = planeCache.get(key);
+          if (!plane) {
+            plane = document.createElement('a-plane');
+            // Static attributes: src, size, material
+            plane.setAttribute('src', assetSelector);
+            plane.setAttribute('width', '1.0');
+            plane.setAttribute('height', '1.0');
+            plane.setAttribute('material', 'side: double; transparent: true;');
+            anchor.appendChild(plane);
+            planeCache.set(key, plane);
+          } else {
+            // Ensure visible if reused
+            plane.setAttribute('visible', 'true');
+          }
+          // Dynamic attributes each frame
           plane.setAttribute('position', `${x.toFixed(3)} ${y.toFixed(3)} ${z.toFixed(3)}`);
 
           // Rotate around Y by the object's direction minus user's heading.
@@ -181,12 +196,13 @@
           const yaw = (yawBase + 180) % 360;
           plane.setAttribute('rotation', `0 ${yaw.toFixed(1)} 0`);
 
-          // Size (meters) and render sides
-          plane.setAttribute('width', '1.0');
-          plane.setAttribute('height', '1.0');
-          plane.setAttribute('material', 'side: double; transparent: true;');
+        });
 
-          anchor.appendChild(plane);
+        // Hide planes not active this frame to avoid re-creation churn
+        planeCache.forEach((plane, key) => {
+          if (!activeKeys.has(key)) {
+            plane.setAttribute('visible', 'false');
+          }
         });
       }
 
@@ -211,7 +227,7 @@
         if (!cachedImageObjects) return; // not ready yet
         const items = selectNearby(cachedImageObjects, lat, lon);
         console.log('[AR] rendering', items.length, 'items at', { lat, lon, heading: deviceHeadingDeg.toFixed(1) });
-        addPlanes(items, { latitude: lat, longitude: lon });
+        updatePlanes(items, { latitude: lat, longitude: lon });
         if (hud) {
           hud.textContent = `Zappar + A‑Frame | lat: ${lat.toFixed(6)} lon: ${lon.toFixed(6)} | heading: ${deviceHeadingDeg.toFixed(1)}°`;
         }
@@ -224,7 +240,7 @@
             const { latitude, longitude } = lastPosition.coords;
             renderWithPosition(latitude, longitude);
           }
-        }, 100);
+        }, 50);
 
         if (!navigator.geolocation) {
           onGeoError(new Error('Geolocation not supported'));
