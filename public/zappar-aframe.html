@@ -50,6 +50,8 @@
       const planeCache = new Map();
       let deviceHeadingDeg = 0; // 0..360, 0 = 北（仮定）
       let headingStarted = false;
+      // 初回描画後に一度だけ placement-mode を false にするためのフラグ
+      let placementDisabledOnce = false;
 
       // Toggle placement mode on tap (place/fix content)
       const togglePlacement = () => {
@@ -230,6 +232,20 @@
         updatePlanes(items, { latitude: lat, longitude: lon });
         if (hud) {
           hud.textContent = `Zappar + A‑Frame | lat: ${lat.toFixed(6)} lon: ${lon.toFixed(6)} | heading: ${deviceHeadingDeg.toFixed(1)}°`;
+        }
+
+        // 初回描画完了後に一度だけ placement-mode を false にする
+        if (!placementDisabledOnce) {
+          placementDisabledOnce = true;
+          // 次フレームで切り替えて「描画後」を保証
+          requestAnimationFrame(() => {
+            const current = anchor.getAttribute('zappar-instant');
+            const placing = current && (current.placementMode === true || current.placementMode === 'true');
+            if (placing) {
+              anchor.setAttribute('zappar-instant', 'placement-mode', 'false');
+              console.log('[AR] placement-mode -> false (after first render)');
+            }
+          });
         }
       }
 
