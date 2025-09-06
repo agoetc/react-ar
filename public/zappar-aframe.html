@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Zappar + A-Frame Sample</title>
+    <!-- A-Frame -->
+    <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
+    <!-- Zappar A-Frame (CDN). If the version changes, update this URL. -->
+    <script src="https://libs.zappar.com/zappar-aframe/2.0.0/zappar-aframe.js"></script>
+    <style>
+      html, body { margin: 0; height: 100%; background: #000; }
+      .overlay { position: fixed; top: 0; left: 0; right: 0; padding: 12px 14px; color: #fff; font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif; background: linear-gradient(rgba(0,0,0,.55), rgba(0,0,0,0)); z-index: 10; }
+      .hint { position: fixed; bottom: 0; left: 0; right: 0; padding: 12px 14px; color: #fff; text-align: center; background: linear-gradient(rgba(0,0,0,0), rgba(0,0,0,.55)); z-index: 10; font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif; }
+      a { color: #9ad; }
+    </style>
+  </head>
+  <body>
+    <div class="overlay">Zappar + A‑Frame: ワールド上に画像を配置（タップで配置/固定）</div>
+    <div class="hint">画面をタップして画像を配置・固定できます</div>
+
+    <!-- AR Scene -->
+    <a-scene
+      vr-mode-ui="enabled: false"
+      renderer="colorManagement: true; physicallyCorrectLights: true; logarithmicDepthBuffer: true"
+      embedded
+    >
+      <!-- Permissions & Compatibility UIs -->
+      <a-entity zappar-permissions-ui></a-entity>
+      <a-entity zappar-compatibility-ui></a-entity>
+
+      <!-- Camera -->
+      <a-camera zappar-camera="userFacing: false"></a-camera>
+
+      <!-- Assets -->
+      <a-assets>
+        <img id="sampleImage" src="/sample-image.svg" crossorigin="anonymous" />
+      </a-assets>
+
+      <!-- Instant World Tracking Anchor -->
+      <a-entity id="instantAnchor" zappar-instant="placement-mode: true">
+        <!-- Simple plane showing an image. Adjust scale/rotation as desired. -->
+        <a-plane src="#sampleImage" position="0 0 0" rotation="-90 0 0" width="1" height="1"></a-plane>
+      </a-entity>
+    </a-scene>
+
+    <script>
+      // Tap to toggle placement mode off (fix content in place)
+      const anchor = document.getElementById('instantAnchor');
+      const togglePlacement = () => {
+        const current = anchor.getAttribute('zappar-instant');
+        const placing = current && (current.placementMode === true || current.placementMode === 'true');
+        anchor.setAttribute('zappar-instant', 'placement-mode', placing ? 'false' : 'true');
+      };
+      document.body.addEventListener('click', togglePlacement);
+    </script>
+  </body>
+  </html>
+
