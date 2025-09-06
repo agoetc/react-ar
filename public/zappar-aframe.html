@@ -43,6 +43,9 @@
       const anchor = document.getElementById('instantAnchor');
       const assets = document.getElementById('assets');
       const hud = document.getElementById('hud');
+      // Cache map: image URL -> asset selector (e.g., #img_0)
+      const imageAssetCache = new Map();
+      let imageAssetSeq = 0;
       let deviceHeadingDeg = 0; // 0..360, 0 = 北（仮定）
       let headingStarted = false;
 
@@ -152,6 +155,8 @@
         while (anchor.firstChild) anchor.removeChild(anchor.firstChild);
 
         items.forEach((item, idx) => {
+          // Ensure cached <img> asset exists and get its selector
+          const assetSelector = ensureAssetFor(item.imagePath);
           // Compute radial placement from user to item using geographic bearing
           const bearing = bearingDeg(user.latitude, user.longitude, item.latitude, item.longitude);
           const distanceKm = haversine(user.latitude, user.longitude, item.latitude, item.longitude);
@@ -166,8 +171,8 @@
           const y = Math.max(0, Math.min(5, Number(item.height) || 0));
 
           const plane = document.createElement('a-plane');
-          // Use direct URL as src to avoid asset reloading race during frequent re-renders
-          plane.setAttribute('src', item.imagePath);
+          // Use cached asset by id (e.g., #img_0) so the same HTMLImageElement/texture is reused
+          plane.setAttribute('src', assetSelector);
           plane.setAttribute('position', `${x.toFixed(3)} ${y.toFixed(3)} ${z.toFixed(3)}`);
 
           // Rotate around Y by the object's direction minus user's heading.
@@ -185,6 +190,19 @@
         });
       }
 
+      function ensureAssetFor(url) {
+        if (imageAssetCache.has(url)) return imageAssetCache.get(url);
+        const id = `img_${imageAssetSeq++}`;
+        const img = document.createElement('img');
+        img.setAttribute('id', id);
+        img.setAttribute('src', url);
+        img.setAttribute('crossorigin', 'anonymous');
+        assets.appendChild(img);
+        const selector = `#${id}`;
+        imageAssetCache.set(url, selector);
+        return selector;
+      }
+
       // Cache for image objects and last known position
       let cachedImageObjects = null;
       let lastPosition = null;
@@ -200,13 +218,13 @@
       }
 
       function startGeolocationLoop() {
-        // Re-render every 500ms using the latest known position
+        // Re-render every 100ms using the latest known position
         setInterval(() => {
           if (lastPosition) {
             const { latitude, longitude } = lastPosition.coords;
             renderWithPosition(latitude, longitude);
           }
-        }, 500);
+        }, 100);
 
         if (!navigator.geolocation) {
           onGeoError(new Error('Geolocation not supported'));
@@ -237,6 +255,11 @@
       fetchImageObjects()
         .then((data) => {
           cachedImageObjects = data;
+          // Pre-warm assets for all unique image paths
+          try {
+            const unique = Array.from(new Set((data || []).map((d) => d.imagePath)));
+            unique.forEach((u) => ensureAssetFor(u));
+          } catch (e) { /* noop */ }
           startGeolocationLoop();
         })
         .catch((e) => {
