@@ -17,17 +17,33 @@ export function getMockImageObjects(): ImageObject[] {
     '/image/mainimg03.png',
   ];
 
+  // Base coordinates: 34.469591, 135.436995 (User location)
+  // 1 degree latitude ≈ 111km, 1 degree longitude ≈ 91km (at this latitude)
+  // 1 meter latitude ≈ 0.000009 degrees, 1 meter longitude ≈ 0.000011 degrees
+  const baseLat = 34.469591;
+  const baseLon = 135.436995;
+  
   const base: ImageObject[] = [
-    { latitude: 35.681236, longitude: 139.767125, height: 1.6, direction: 10, imagePath: images[0] }, // Tokyo Station
-    { latitude: 34.693738, longitude: 135.502165, height: 2.0, direction: 45, imagePath: images[1] }, // Osaka
-    { latitude: 35.170915, longitude: 136.881537, height: 1.2, direction: 90, imagePath: images[2] }, // Nagoya
-    { latitude: 43.061936, longitude: 141.354292, height: 3.0, direction: 135, imagePath: images[3] }, // Sapporo
-    { latitude: 33.590355, longitude: 130.401716, height: 0.8, direction: 180, imagePath: images[4] }, // Fukuoka
-    { latitude: 26.212401, longitude: 127.680932, height: 2.5, direction: 225, imagePath: images[5] }, // Naha
-    { latitude: 35.011564, longitude: 135.768149, height: 1.0, direction: 270, imagePath: images[0] }, // Kyoto
-    { latitude: 38.268839, longitude: 140.872103, height: 1.8, direction: 300, imagePath: images[1] }, // Sendai
-    { latitude: 36.341813, longitude: 140.446793, height: 2.2, direction: 320, imagePath: images[2] }, // Mito
-    { latitude: 34.385203, longitude: 132.455293, height: 1.4, direction: 350, imagePath: images[3] }, // Hiroshima
+    // 5 meters north
+    { latitude: baseLat + 0.000045, longitude: baseLon, height: 1.6, direction: 180, imagePath: images[0], name: "北の絵画" },
+    // 3 meters northeast  
+    { latitude: baseLat + 0.000027, longitude: baseLon + 0.000033, height: 2.0, direction: 225, imagePath: images[1], name: "北東の絵画" },
+    // 4 meters east
+    { latitude: baseLat, longitude: baseLon + 0.000044, height: 1.2, direction: 270, imagePath: images[2], name: "東の絵画" },
+    // 6 meters southeast
+    { latitude: baseLat - 0.000054, longitude: baseLon + 0.000066, height: 1.8, direction: 315, imagePath: images[3], name: "南東の絵画" },
+    // 3 meters south
+    { latitude: baseLat - 0.000027, longitude: baseLon, height: 2.5, direction: 0, imagePath: images[4], name: "南の絵画" },
+    // 7 meters southwest
+    { latitude: baseLat - 0.000063, longitude: baseLon - 0.000077, height: 1.0, direction: 45, imagePath: images[5], name: "南西の絵画" },
+    // 2 meters west
+    { latitude: baseLat, longitude: baseLon - 0.000022, height: 1.4, direction: 90, imagePath: images[0], name: "西の絵画" },
+    // 8 meters northwest
+    { latitude: baseLat + 0.000072, longitude: baseLon - 0.000088, height: 2.2, direction: 135, imagePath: images[1], name: "北西の絵画" },
+    // 1.5 meters up close north
+    { latitude: baseLat + 0.000014, longitude: baseLon, height: 1.7, direction: 180, imagePath: images[2], name: "目の前の絵画" },
+    // 10 meters far northeast
+    { latitude: baseLat + 0.000090, longitude: baseLon + 0.000110, height: 3.0, direction: 225, imagePath: images[3], name: "遠くの絵画" },
   ];
 
   return base;

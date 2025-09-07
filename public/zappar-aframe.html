@@ -11,13 +11,20 @@
     <style>
       html, body { margin: 0; height: 100%; background: #000; }
       .overlay { position: fixed; top: 0; left: 0; right: 0; padding: 12px 14px; color: #fff; font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif; background: linear-gradient(rgba(0,0,0,.55), rgba(0,0,0,0)); z-index: 10; }
-      .hint { position: fixed; bottom: 0; left: 0; right: 0; padding: 12px 14px; color: #fff; text-align: center; background: linear-gradient(rgba(0,0,0,0), rgba(0,0,0,.55)); z-index: 10; font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif; }
+      .image-list { position: fixed; bottom: 20px; right: 20px; width: 280px; max-height: 400px; overflow-y: auto; background: rgba(0,0,0,0.8); border-radius: 8px; padding: 12px; color: #fff; font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif; font-size: 12px; z-index: 20; }
+      .image-item { display: flex; align-items: center; margin-bottom: 8px; padding: 6px; background: rgba(255,255,255,0.1); border-radius: 4px; }
+      .image-item img { width: 40px; height: 40px; object-fit: cover; border-radius: 4px; margin-right: 8px; }
+      .image-info { flex: 1; }
+      .image-name { font-weight: 600; margin-bottom: 2px; }
+      .image-details { color: #ccc; font-size: 11px; }
       a { color: #9ad; }
     </style>
   </head>
   <body>
-    <div class="overlay" id="hud">Zappar + A‑Frame: ワールド上に画像を配置（タップで配置/固定）</div>
-    <div class="hint">画面をタップして画像を配置・固定できます</div>
+    <div class="overlay" id="hud">AR絵画ビューアー</div>
+    <div class="image-list" id="imageList">
+      <div style="font-weight: 600; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.3); padding-bottom: 4px;">読み込み中の画像</div>
+    </div>
 
     <!-- AR Scene -->
     <a-scene
@@ -36,13 +43,23 @@
       <a-assets id="assets"></a-assets>
 
       <!-- Instant World Tracking Anchor -->
-      <a-entity id="instantAnchor" zappar-instant="placement-mode: true"></a-entity>
+      <a-entity id="worldGroup" zappar-instant="placement-mode: true">
+        <!-- Test plane: red square 2m in front -->
+        <a-plane position="0 1.5 -2" width="1" height="1" material="color: red; side: double;" visible="true"></a-plane>
+        <!-- Test plane: blue square 1m to the right -->
+        <a-plane position="1 1.5 -1.5" width="1" height="1" material="color: blue; side: double;" visible="true"></a-plane>
+        <!-- Test plane: green square close to camera -->
+        <a-plane position="0 1.6 -0.5" width="0.3" height="0.3" material="color: green; side: double;" visible="true"></a-plane>
+        <!-- Test box for depth reference -->
+        <a-box position="0 0 -3" width="0.5" height="0.5" depth="0.5" material="color: yellow" visible="true"></a-box>
+      </a-entity>
     </a-scene>
 
     <script>
-      const anchor = document.getElementById('instantAnchor');
+      const anchor = document.getElementById('worldGroup');
       const assets = document.getElementById('assets');
       const hud = document.getElementById('hud');
+      const imageList = document.getElementById('imageList');
       // Cache map: image URL -> asset selector (e.g., #img_0)
       const imageAssetCache = new Map();
       let imageAssetSeq = 0;
@@ -50,31 +67,43 @@
       const planeCache = new Map();
       let deviceHeadingDeg = 0; // 0..360, 0 = 北（仮定）
       let headingStarted = false;
-      // 初回描画後に一度だけ placement-mode を false にするためのフラグ
-      let placementDisabledOnce = false;
-
-      // Toggle placement mode on tap (place/fix content)
-      const togglePlacement = () => {
-        const current = anchor.getAttribute('zappar-instant');
-        const placing = current && (current.placementMode === true || current.placementMode === 'true');
-        anchor.setAttribute('zappar-instant', 'placement-mode', placing ? 'false' : 'true');
-        // On first user gesture, try to start device orientation permissions
-        ensureHeadingPermission();
+      // Auto-place and fix anchor after first interaction
+      let anchorPlaced = false;
+      let orientationStarted = false;
+      
+      const placeAnchorOnce = () => {
+        if (!anchorPlaced) {
+          anchorPlaced = true;
+          console.log('[AR] Placing instant tracking anchor');
+          
+          // Auto-place after 1 second
+          setTimeout(() => {
+            anchor.setAttribute('zappar-instant', 'placement-mode', 'false');
+            console.log('[AR] Anchor placed and fixed');
+          }, 1000);
+        }
       };
-      document.body.addEventListener('click', togglePlacement);
+      
+      const startOrientationOnce = () => {
+        if (!orientationStarted) {
+          orientationStarted = true;
+          ensureHeadingPermission();
+          placeAnchorOnce();
+        }
+      };
+      document.body.addEventListener('click', startOrientationOnce, { once: true });
 
       function handleOrientation(e) {
         let heading = null;
         // iOS Safari provides webkitCompassHeading (0 = 北, 時計回り)
         if (typeof e.webkitCompassHeading === 'number') {
           heading = e.webkitCompassHeading;
-        } else if (e.absolute === true && typeof e.alpha === 'number') {
-          // 一部ブラウザでは alpha が真北基準（0=北）の場合があるため簡易対応
-          heading = 360 - e.alpha; // 右回りに正となるよう反転
+        } else if (typeof e.alpha === 'number') {
+          // Android/other browsers: alpha is compass heading
+          heading = e.alpha;
         }
         if (heading != null && isFinite(heading)) {
           deviceHeadingDeg = (heading + 360) % 360;
-          // console.log('[Heading] 現在の方位(度):', deviceHeadingDeg.toFixed(1));
         }
       }
 
@@ -154,6 +183,44 @@
         return Math.max(0.6, Math.min(8, km * SCALE));
       }
 
+      function updateImageList(items, user) {
+        const header = imageList.querySelector('div');
+        header.textContent = `読み込み済み画像 (${items.length})`;
+        
+        // Remove existing items except header
+        const existingItems = imageList.querySelectorAll('.image-item');
+        existingItems.forEach(item => item.remove());
+        
+        items.forEach((item, idx) => {
+          const bearing = bearingDeg(user.latitude, user.longitude, item.latitude, item.longitude);
+          const distanceKm = haversine(user.latitude, user.longitude, item.latitude, item.longitude);
+          
+          const itemDiv = document.createElement('div');
+          itemDiv.className = 'image-item';
+          
+          const img = document.createElement('img');
+          img.src = item.imagePath;
+          img.onerror = () => { img.src = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40"><rect width="40" height="40" fill="%23333"/><text x="20" y="25" text-anchor="middle" fill="white" font-size="10">IMG</text></svg>'; };
+          
+          const infoDiv = document.createElement('div');
+          infoDiv.className = 'image-info';
+          
+          const name = document.createElement('div');
+          name.className = 'image-name';
+          name.textContent = item.name || `画像 ${idx + 1}`;
+          
+          const details = document.createElement('div');
+          details.className = 'image-details';
+          details.textContent = `${distanceKm.toFixed(1)}km | ${bearing.toFixed(0)}°`;
+          
+          infoDiv.appendChild(name);
+          infoDiv.appendChild(details);
+          itemDiv.appendChild(img);
+          itemDiv.appendChild(infoDiv);
+          imageList.appendChild(itemDiv);
+        });
+      }
+
       function updatePlanes(items, user) {
         const activeKeys = new Set();
 
@@ -169,11 +236,25 @@
           const rad = (bearing * Math.PI) / 180;
 
           // A-Frame: -Z forward, X right. Map 0° (north) -> forward (-Z)
-          const x = Math.sin(rad) * r;
-          const z = -Math.cos(rad) * r;
+          let x = Math.sin(rad) * r;
+          let z = -Math.cos(rad) * r;
 
-          // Height from data (meters), clamped
-          const y = Math.max(0, Math.min(5, Number(item.height) || 0));
+          // For testing: place first image closer for visibility
+          if (idx === 0) {
+            console.log('[DEBUG] Adjusting first image position for testing');
+            const scale = Math.min(1.0, r / 3); // Scale down if too far
+            x = x * scale;
+            z = z * scale;
+            // Ensure minimum distance of 1.5m
+            const currentDist = Math.sqrt(x*x + z*z);
+            if (currentDist < 1.5) {
+              x = (x / currentDist) * 1.5;
+              z = (z / currentDist) * 1.5;
+            }
+          }
+
+          // Height from data (meters), clamped, default to eye level if 0
+          const y = Math.max(1.5, Math.min(5, Number(item.height) || 1.5));
 
           let plane = planeCache.get(key);
           if (!plane) {
@@ -183,12 +264,31 @@
             plane.setAttribute('width', '1.0');
             plane.setAttribute('height', '1.0');
             plane.setAttribute('material', 'side: double; transparent: true;');
+            
+            // Debug: add colored border and test visibility
+            console.log(`[PLANE] Creating plane at ${x.toFixed(2)}, ${y.toFixed(2)}, ${z.toFixed(2)}`);
+            
             anchor.appendChild(plane);
             planeCache.set(key, plane);
+            
+            // Debug: ensure the plane is actually added
+            console.log(`[PLANE] Plane added to anchor, total children: ${anchor.children.length}`);
           } else {
             // Ensure visible if reused
             plane.setAttribute('visible', 'true');
+            console.log(`[PLANE] Reusing existing plane`);
           }
+          // Debug logging
+          console.log(`[DEBUG] Item ${idx}:`, {
+            bearing: bearing.toFixed(1),
+            distanceKm: distanceKm.toFixed(3),
+            r: r.toFixed(3),
+            x: x.toFixed(3),
+            y: y.toFixed(3),
+            z: z.toFixed(3),
+            deviceHeading: deviceHeadingDeg.toFixed(1)
+          });
+
           // Dynamic attributes each frame
           plane.setAttribute('position', `${x.toFixed(3)} ${y.toFixed(3)} ${z.toFixed(3)}`);
 
@@ -215,9 +315,15 @@
         img.setAttribute('id', id);
         img.setAttribute('src', url);
         img.setAttribute('crossorigin', 'anonymous');
+        
+        // Debug image loading
+        img.onload = () => console.log(`[IMG] Loaded: ${url}`);
+        img.onerror = (e) => console.error(`[IMG] Failed to load: ${url}`, e);
+        
         assets.appendChild(img);
         const selector = `#${id}`;
         imageAssetCache.set(url, selector);
+        console.log(`[ASSET] Created asset ${selector} for ${url}`);
         return selector;
       }
 
@@ -229,24 +335,13 @@
         if (!cachedImageObjects) return; // not ready yet
         const items = selectNearby(cachedImageObjects, lat, lon);
         console.log('[AR] rendering', items.length, 'items at', { lat, lon, heading: deviceHeadingDeg.toFixed(1) });
-        updatePlanes(items, { latitude: lat, longitude: lon });
+        const user = { latitude: lat, longitude: lon };
+        updatePlanes(items, user);
+        updateImageList(items, user);
         if (hud) {
           hud.textContent = `Zappar + A‑Frame | lat: ${lat.toFixed(6)} lon: ${lon.toFixed(6)} | heading: ${deviceHeadingDeg.toFixed(1)}°`;
         }
 
-        // 初回描画完了後に一度だけ placement-mode を false にする
-        if (!placementDisabledOnce) {
-          placementDisabledOnce = true;
-          // 次フレームで切り替えて「描画後」を保証
-          requestAnimationFrame(() => {
-            const current = anchor.getAttribute('zappar-instant');
-            const placing = current && (current.placementMode === true || current.placementMode === 'true');
-            if (placing) {
-              anchor.setAttribute('zappar-instant', 'placement-mode', 'false');
-              console.log('[AR] placement-mode -> false (after first render)');
-            }
-          });
-        }
       }
 
       function startGeolocationLoop() {
@@ -277,9 +372,9 @@
 
       function onGeoError(err) {
         console.warn('Geolocation error', err);
-        // Fallback: use Tokyo Station and still keep the 500ms loop
-        const latitude = 35.681236, longitude = 139.767125;
-        console.log('[Geolocation] 取得失敗のため東京駅座標を使用:', { latitude, longitude });
+        // Fallback: use user location and still keep the 500ms loop
+        const latitude = 34.469591, longitude = 135.436995;
+        console.log('[Geolocation] 取得失敗のためユーザー座標を使用:', { latitude, longitude });
         lastPosition = { coords: { latitude, longitude } };
       }
 
