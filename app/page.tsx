@@ -18,6 +18,11 @@ export default function Home() {
         >
           画像登録
         </button>
+         <div className="mt-8 text-center text-base">
+          <Link href="/quize/register" className="text-white no-underline hover:underline">
+            Quize
+          </Link>
+        </div>
       </div>
     </div>
   );
