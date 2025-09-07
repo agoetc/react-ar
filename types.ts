@@ -12,4 +12,21 @@ export type ImageObject = {
   /** 画像のパス */
   imagePath: string;
 };
+//左にパラメーター右に型//
+export type Quize = {
+  title: string;
+  choiceA: string;
+  choiceB: string;
+  answer: string;
 
+  /** 緯度 */
+  latitude: number;
+  /** 経度 */
+  longitude: number;
+  /** 高さ (メートル想定) */
+  height: number;
+  /** 方位 (度: 0-360 を想定) */
+  direction: number;
+  /** 画像のパス */
+  imagePath: string;
+};
